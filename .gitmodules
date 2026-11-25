@@ -1,4 +1,4 @@
 [submodule "app"]
 	path = app
-	url = https://github.com/akshaynexus/OneOS
+	url = https://github.com/burugou05-wq/OneOS
 	branch = oneios

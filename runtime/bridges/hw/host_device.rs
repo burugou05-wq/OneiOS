@@ -83,7 +83,7 @@ const NONE: &[&str] = &[];
 //     here. Marks as in docs/s25.md: [F] read from the source named, [I] inferred, [U] unknown until a phone shows it.
 // Match strings: the model prefixes and codenames are the phone gates' (scripts/port/verify-host.sh, docs/a56-oneos-fork.md);
 // a SoC or platform match alone means "this SoC's entry" (the S24 and S24+ on SM8650 get the S24 Ultra's: no change).
-static TABLE: [HostDevice; 5] = [
+static TABLE: [HostDevice; 7] = [
     // The home device. [F] SM-S928*, e3q, SM8650 (verify-host.sh, the OneOS fork's gate); platform pineapple [F] (the
     // stock device tree, qcom/pineapple-v2.dts, docs/hardware.md). No defaults: everything is today's.
     // The model prefix takes every S24 Ultra model number (docs/hardware.md 7h, "The S24 Ultra's models"; the record
@@ -166,6 +166,37 @@ static TABLE: [HostDevice; 5] = [
         config: NONE,
         env: &["ONEIOS_BRIGHT_MAX=2300"],
         takeover: true,
+    },
+    // Galaxy S26 (base model, Snapdragon 8 Elite Gen 2 / SM8850).
+    // [F] SC-51G (docomo SM-S942D), m1q, SM8850, platform canoe, One UI 9.0 / Android 17 (6.12.69, 4 KiB pages),
+    // 1080x2340@120 Hz panel (mMaxLuminance 1275.0), Oryon 8 cores (cpu0-5 cap 741 384..3628.8 MHz MIDR 0x512f0021;
+    // cpu6-7 cap 1024 768..4742.4 MHz MIDR 0x513f0021), ~10.83 GiB usable RAM, Adreno 840 KGSL + /dev/udmabuf,
+    // thermal passive 105-114 C / hot 125 C (+ cpu-hw-trip-0/1 at 105 C, excluded by thermal bridge).
+    // Model prefixes also cover global/carrier SM-S942*, SM-S941*, and au SCG36. Placed after galaxy-s26-ultra so
+    // bare SM8850/canoe without a model or device keeps matching galaxy-s26-ultra.
+    HostDevice {
+        name: "galaxy-s26",
+        label: "Galaxy S26 (SM-S942 / SM-S941 / SC-51G, SM8850)",
+        models: &["SM-S942", "SM-S941", "SC-51G", "SCG36"],
+        devices: &["m1q"],
+        socs: &["SM8850"],
+        platforms: &["canoe"],
+        config: &["panel-fallback=1080x2340@120"],
+        env: &["ONEIOS_BRIGHT_MAX=2300", "ONEIOS_THERMAL_SOC_TRIPS=1", "ONEIOS_THERMAL_SOC_SAMPLES=3"],
+        takeover: false,
+    },
+    // Galaxy S26 (base model, Exynos 2600 / s5e9965, m1s). [S] No KGSL on Exynos (Xclipse 960 on amdgpu), so gpu=2d
+    // and FHD+ 1080x2340@120 panel fallback until an m1s unit is captured and verified.
+    HostDevice {
+        name: "galaxy-s26-exynos",
+        label: "Galaxy S26 (SM-S942 / SM-S941, s5e9965)",
+        models: &["SM-S942", "SM-S941"],
+        devices: &["m1s"],
+        socs: &["s5e9965"],
+        platforms: &["s5e9965", "erd9965"],
+        config: &["gpu=2d", "panel-fallback=1080x2340@120"],
+        env: NONE,
+        takeover: false,
     },
     // docs/a56.md, profiles/ios-*-a56.toml, docs/a56-oneos-fork.md. [F] SM-A566E, a56x, s5e8855 (the fork's gate:
     // ro.soc.model); platform s5e8855 [I]. gpu=2d [F]: no KGSL (Xclipse 540 on amdgpu, /dev/dri/renderD128) and xnuhost's
@@ -320,7 +351,18 @@ fn compatible_has(list: &str, name: &str) -> bool {
 pub fn host_match(f: &HostFacts) -> Option<(&'static HostDevice, String)> {
     let any_case = |list: &[&str], value: &str| !value.is_empty() && list.iter().any(|s| s.eq_ignore_ascii_case(value));
     if !f.model.is_empty() {
-        if let Some(e) = TABLE.iter().find(|e| e.models.iter().any(|m| f.model.starts_with(m))) {
+        let model_matches = |e: &&HostDevice| e.models.iter().any(|m| f.model.starts_with(m));
+        let hw_agrees = |e: &&HostDevice| {
+            any_case(e.devices, &f.device)
+                || (!f.soc_model.is_empty() && e.socs.iter().any(|s| s.eq_ignore_ascii_case(&f.soc_model)))
+                || (!f.machine.is_empty() && e.socs.iter().any(|s| s.eq_ignore_ascii_case(&f.machine)))
+                || any_case(e.platforms, &f.platform)
+                || (!f.compatible.is_empty()
+                    && (e.socs.iter().any(|n| compatible_has(&f.compatible, n))
+                        || e.platforms.iter().any(|n| compatible_has(&f.compatible, n))))
+        };
+        if let Some(e) = TABLE.iter().filter(model_matches).find(hw_agrees).or_else(|| TABLE.iter().find(model_matches))
+        {
             return Some((e, format!("ro.product.model={}", f.model)));
         }
     }

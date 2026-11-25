@@ -594,12 +594,55 @@ fn hostcalls_vector() -> u64 {
     crate::hostcalls::vector().map_or(0, |v| v as *const _ as u64)
 }
 
+fn ro_bind(paths: &[String]) -> i32 {
+    if paths.is_empty() {
+        eprintln!("xnuhost: --ro-bind requires at least one path");
+        return 2;
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        for p in paths {
+            let Ok(cpath) = std::ffi::CString::new(p.as_str()) else {
+                eprintln!("xnuhost: --ro-bind: NUL in path '{p}'");
+                return 2;
+            };
+            // SAFETY: cpath is a valid NUL-terminated C string; fstype and data are NULL for MS_BIND | MS_REMOUNT | MS_RDONLY.
+            let rc = unsafe {
+                libc::mount(
+                    cpath.as_ptr(),
+                    cpath.as_ptr(),
+                    std::ptr::null(),
+                    libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
+                    std::ptr::null(),
+                )
+            };
+            if rc != 0 {
+                let err = std::io::Error::last_os_error();
+                eprintln!("xnuhost: --ro-bind {p}: {err}");
+                return 1;
+            }
+        }
+        0
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = paths;
+        eprintln!("xnuhost: --ro-bind: supported only on Linux/Android");
+        2
+    }
+}
+
 /// The program (main.c's main): the exit code.
 pub fn main() -> i32 {
     let argv: Vec<String> = std::env::args_os().map(|a| a.to_string_lossy().into_owned()).collect();
     // --prop-wait: the OneOS stop loop's wait on Android's properties (propwait.rs), before anything of a session.
     if argv.get(1).map(String::as_str) == Some("--prop-wait") {
         return crate::propwait::main(&argv[2..]);
+    }
+    // --ro-bind PATH...: remount existing bind mounts read-only via mount(2) directly (BusyBox 1.36 on KernelSU/S26 fails to
+    // match single-file bind mounts in /proc/mounts).
+    if argv.get(1).map(String::as_str) == Some("--ro-bind") {
+        return ro_bind(&argv[2..]);
     }
     #[cfg(all(target_os = "android", target_arch = "aarch64"))]
     {

@@ -1,5 +1,43 @@
 # OneiOS
 
+> **Galaxy S26 (Base Model) Fork (`burugou05-wq/OneiOS`)** — Adds formal support, hardware profiles, and an in-app/on-device fix for the **Samsung Galaxy S26** (`SM-S942*`, `SM-S941*`, Japanese docomo `SC-51G`, au `SCG36`, Snapdragon `SM8850` `m1q`, Exynos `s5e9965` `m1s`, and unmodeled carrier/global S26 variants). Booted iOS 27 (24A446) to the Home Screen and returned in place to One UI on a real docomo Galaxy S26 (`SC-51G`, One UI 9.0 / Android 17, Kernel `6.12.69`, KernelSU).
+>
+> **Companion OneOS App Fork**: [`burugou05-wq/OneOS`](https://github.com/burugou05-wq/OneOS) (`oneios` branch, linked as submodule `app/`).
+
+---
+
+### What this fork adds for the Galaxy S26
+
+- **Host device profiles & disambiguation** ([profiles/host-galaxy-s26-sm8850.toml](profiles/host-galaxy-s26-sm8850.toml), [profiles/host-galaxy-s26-exynos-s5e9965.toml](profiles/host-galaxy-s26-exynos-s5e9965.toml), [runtime/bridges/hw/host_device.rs](runtime/bridges/hw/host_device.rs), [docs/s26.md](docs/s26.md)):
+  - **`galaxy-s26`** (`SM-S942`, `SM-S941`, `SC-51G`, `SCG36` / `m1q` / `SM8850` / `canoe`): `panel-fallback=1080x2340@120`, `ONEIOS_BRIGHT_MAX=2300`, `ONEIOS_THERMAL_SOC_TRIPS=1`, `ONEIOS_THERMAL_SOC_SAMPLES=3`, 6 P + 2 lent E Oryon vCPUs, Adreno 840 3D via `drm2kgsl`.
+  - **`galaxy-s26-exynos`** (`SM-S942`, `SM-S941` / `m1s` / `s5e9965`): `gpu=2d`, `panel-fallback=1080x2340@120`.
+  - **`host_match` / `oneios-phone` disambiguation**: shared `SM-S942*` / `SM-S941*` model prefixes prefer the row agreeing on `device`, `soc_model`, `machine`, `platform`, or device-tree `compatible`.
+- **KernelSU single-file read-only mount fix (`xnuhost --ro-bind`)** ([runtime/xnuhost/src/session.rs](runtime/xnuhost/src/session.rs), [app/switcher/assets/oneios_switch.sh](app/switcher/assets/oneios_switch.sh)):
+  - On Galaxy S26 with KernelSU BusyBox `1.36.1.1`, `mount -o remount,bind,ro /data/oneios_switch.sh` failed (`can't find /data/oneios_switch.sh in /proc/mounts`, exit 70). `xnuhost --ro-bind PATH...` calls Linux `mount(2)` (`MS_BIND | MS_REMOUNT | MS_RDONLY`) directly as a fallback, verified read-only on live `SC-51G` kernel `6.12.69`.
+- **OneOS app card & variant support (`app/`)**:
+  - Shows **iOS 27 (OneiOS)** in `Choose a system` for known S26 profiles (`s-8850`, `s-8850-jp`, `s-9965`) and any unknown S26 carrier/global/Exynos/Snapdragon variant (`OneiosSystem.isGalaxyS26Variant`), warning rather than refusing.
+- **Measured on real `SC-51G` hardware**:
+  - `oneios-display`: `1080x2340 at 120 Hz` 1:1 unscaled (`first frame posted`), Adreno 840 `drm2kgsl` 3D active, `SpringBoard` & `backboardd` booted to Home Screen (~29–36 fps peak before first-boot indexing + charging thermal throttling `policy6` to `3.39 GHz`), and **in-place return to One UI** (`One UI restored in place (Enforcing)`). Not daily-driver ready yet.
+
+### Building this fork
+
+```sh
+# 1. Runtime package (Linux / WSL2 / macOS with Rust stable + aarch64-linux-android + aarch64-unknown-none + NDK 28.2.13676358)
+scripts/setup/get-references.sh virglrenderer
+./runtime/package.sh 0.1.18-s26
+# -> out/release/oneios-runtime-0.1.18-s26-arm64.tar.zst
+
+# 2. OneOS-oneios debug APK (requires a GitHub classic PAT with read:packages for tribalfs Maven packages in ~/.config/twidget/github.properties)
+./app/scripts/build-guest-manager.sh --debug
+./app/app-android/gradlew -p app/app-android :app:assembleFullDebug
+```
+
+> **Note on building the iOS image on-phone**: A `runtime/package.sh` build without `out/kernel/current` does not carry `kernel/xnu.macho`. During **Make iOS image**, OneOS temporarily fetches upstream's latest runtime to prelink `kernel.kc`; once image creation finishes, re-select this fork's `oneios-runtime-*-s26-arm64.tar.zst` under **OneiOS runtime -> Other ways to get it -> Use a runtime file I have** before tapping **Switch**.
+
+---
+
+# OneiOS (Upstream)
+
 > iOS 27 next to One UI on a rooted Samsung Galaxy S24 Ultra — switched to and back the way OneOS switches Androids. Nothing flashed, the image lives in a folder, One UI's kernel keeps running.
 
 **Status: experimental, under active development.** On the phone it boots to the Home Screen (unlock works, GPU-composited, touch, keyboard and S Pen work) and returns to One UI. See [what works](#what-works) and [known issues](#known-issues) below — both are kept honest. The phone results below are of the C runtime: the host runtime (xnuhost, its loader, the bridges, the display helper) was rewritten in Rust on 2026-11-23 ([runtime/RUST.md](runtime/RUST.md)); its host tests pass and it boots the test kernel under qemu, but **no phone has run the Rust runtime yet**.
@@ -76,6 +114,7 @@ Primary target: the rooted Galaxy S24 Ultra. S25, S25 Ultra, S26 Ultra and Galax
 | ![Galaxy S25 Ultra](docs/images/s25-ultra.jpg) | Galaxy S25 Ultra (SM-S938, SM8750) — [YumikoHayamato/OneiOS](https://github.com/YumikoHayamato/OneiOS) (branch `s25-ultra-sm8750`), denis fork, [s25ver snapshot](https://github.com/xaxaapple/s25ver) | SpringBoard, touch and the key return on device (fork sessions 1-7); ported: Oryon topology, Adreno 830 fences, the thermal trips rule, udmabuf ENOMEM fallback | Big-only-SoC bug fixed for all |
 | | Galaxy S25 (SM-S931B, SM8750) — [NoNameBuilder/OneiOS](https://github.com/NoNameBuilder/OneiOS) | Source-level port, no on-device run; ported: host profile, stand-in tests, firmware facts | `panel-fallback=1080x2340@120` by detection |
 | ![Galaxy S26 Ultra](docs/images/s26-ultra.jpg) | Galaxy S26 Ultra (SM-S988, SM8850) — [YMGPwcca/OneiOS](https://github.com/YMGPwcca/OneiOS) | ~600 s iOS run on device | Haptics + backend tests ported |
+| | Galaxy S26 (SM-S942 / SM-S941 / SC-51G / SCG36, SM8850 & s5e9965) — **this fork** ([burugou05-wq/OneiOS](https://github.com/burugou05-wq/OneiOS)) | Booted iOS 27 (24A446) to Home Screen & returned in place on `SC-51G` | `host_device` S26 rows + disambiguation, `1080x2340@120`, thermal trips, `xnuhost --ro-bind`, OneOS S26 card & variant support |
 | ![Galaxy A56](docs/images/a56.jpg) | Galaxy A56 (SM-A566E, Exynos 1580) — [Musicalista/OneiOS-A56](https://github.com/Musicalista/OneiOS-A56) | iOS 16.5 to lock screen on device; touch works in the fork since 2026-11-21 (its kernel patch 0079, not here yet) | GPU template, bootstrap, triage tools; since 2026-11-23 our own iOS 16.5 image and the OneOS app's A56 path ([docs/a56.md](docs/a56.md); not run on an A56) |
 
 Device photos: official Samsung product images ([samsung.com](https://www.samsung.com/us/smartphones/galaxy-s25-ultra/), Samsung Newsroom press kits), © Samsung Electronics — used for device identification. A56 photo: [Captainmorlypogi1959 via Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Samsung_Galaxy_A56_5G_2025_(cropped).jpg) (CC BY-SA 4.0).
